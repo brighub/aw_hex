@@ -1,0 +1,16 @@
+{
+  "name": "hexatron-server",
+  "version": "0.9.6",
+  "description": "hexatron backend",
+  "main": "app.js",
+  "scripts": {
+    "test": "test"
+  },
+  "author": "Brigham Stevens",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^0.18.0",
+    "express": "^4.16.3",
+    "socket.io": "^2.1.1"
+  }
+}
