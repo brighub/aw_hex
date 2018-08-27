@@ -87,8 +87,8 @@ $(function () {
         Spawn: (event) => {},
     }
 
-    for (action in eventMap) {
-        let key = action
+    for (const property of Object.keys(eventMap)) {
+        const key = property
         socket.on(key, (event) => {
             const eventHandler = eventMap[key]
             eventHandler(event)

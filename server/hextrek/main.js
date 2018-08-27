@@ -25,6 +25,7 @@ class Rectifier extends Sprite {
 class Wall extends Sprite {
     constructor(owner, fromEdge, toEdge) {
         super()
+        this.owner = owner
         this.fromEdge = fromEdge
         this.toEdge = toEdge
     }
@@ -119,7 +120,6 @@ class Game {
             Accelerate: (player, event) => {},
             Rotate: (player, event) => {},
             Eject: (player, event) => {},
-
             Hex: (player, event) => {},
             Text: (player, event) => {
                 player.socket.broadcast('Text', event)
@@ -141,7 +141,7 @@ class Game {
 
         // try to maintain 20fps
         const elapsed = new Date() - startTime
-        const sleep = elapsed > 50 ? 50 - (elapsed % 50) : 50 - elapsed
+        const sleep = elapsed > 50 ? 50 - (elapsed/2 % 25) : 50 - elapsed
         this.eventTimer = setTimeout(() => this.processEvents(), sleep)
     }
 
@@ -169,15 +169,18 @@ class Game {
             this.players.remove(player)
         })
 
-        for (const key in this.eventMap) socket.on(key, (event) => {
-            this.messageReceiver(key, event, player)
-        })
+        for (const property of Object.keys(this.eventMap)) {
+            const key = property
+            socket.on(key, (event) => {
+                this.messageReceiver(key, event, player)
+            })
+        }
     }
 
     start(io) {
         io.on("connection", socket => {
             if (this.players.available()) {
-                let player = new Player(socket, this.playerId++)
+                let player = new Player(socket, this.playerId += 37)
                 this.players.enqueue(player)
                 this.attach(socket, player)
                 socket.broadcast.emit('Text', {f: 'MCP', m: `${player.name} has joined!`})
@@ -189,7 +192,7 @@ class Game {
     }
 
     stop() {
-        clearInterval(this.eventTimer)
+        clearTimeout(this.eventTimer)
         this.eventTimer = null
         this.players.visit((player) => player.socket.disconnect())
         process.exitCode = 1
