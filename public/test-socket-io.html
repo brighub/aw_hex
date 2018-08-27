@@ -7,162 +7,102 @@
 <body>
 <style>
     .messages {
-        font-size:24px
-        color:orange
-        height:200px
-        border:1px solid black
+        font-size:24px;
+        color:darkcyan;
+        height:200px;
+        border:1px solid black;
+        margin-bottom:4px;
+        background:darkgrey;
+        margin:1em;
+        padding:2px;
     }
 
     input {
-        width:360px
+        width:360px;
     }
 </style>
-<div class="chat page">
-    <div class="chatArea">
-        <div class="messages"></div>
-    </div>
-    <input class="inputMessage" placeholder="Type here..."/>
-</div>
 
-<ul class="pages">
-    <li class="login page">
-        <div class="form">
-            <h3 class="title">What's your nickname?</h3>
-            <input class="usernameInput" type="text" maxlength="14"/>
+<div class="page">
+    <div class="chatArea">
+        <div class="messages">
+
         </div>
-    </li>
-</ul>
+    </div>
+    <input class="inputMessage"/>
+</div>
 
 <script src="/js/jquery.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 
 <script>
 $(function () {
-    var $window = $(window)
-    var $usernameInput = $('.usernameInput') // Input for username
-    var $messages = $('.messages') // Messages area
-    var $inputMessage = $('.inputMessage') // Input message input box
-
-    var $loginPage = $('.login.page') // The login page
-    var $chatPage = $('.chat.page') // The chatroom page
-
-    var username
-    var $currentInput = $usernameInput.focus()
-
+    var $messages = $('.messages')
+    var $input = $('input')
     var socket = io({reconnect: false})
     socket.on('connect', () => {
-        console.log('conektid')
+        console.log('connected')
     })
-    socket.on('disconnect', function () {
-        log('you have been disconnected')
+    socket.on('disconnect', function (e) {
+        console.log('dropped', e)
     })
-
-    socket.on('reconnect', function () {
-        log('you have been reconnected')
-    })
-
-    socket.on('reconnect_error', function () {
-        log('attempt to reconnect has failed')
-    })
-
-    function connect() {
-        username = cleanInput($usernameInput.val().trim())
-        if (username) {
-            sendIdentity(username)
-            $loginPage.hide()
-            $chatPage.show()
-            $currentInput = $inputMessage.focus()
-        }
-
-    }
-
-    function sendIdentity(username) {
-        socket.emit('Identity', {name: username, priority:'now'})
-    }
 
     function sendMessage() {
-        var message = $inputMessage.val()
-        message = cleanInput(message)
+        var message = $input.val()
+        message = clean(message)
         if (message) {
-            $inputMessage.val('')
-            addChatMessage({
+            $input.val('')
+            addMessage({
                 username: username,
                 message: message
             })
-            socket.emit('Text', {t:'Text', f:username, m:message})
+            socket.emit('Text', {f:username, m:message})
         }
     }
 
-    $window.keydown(function (event) {
+    $input.keydown(function (event) {
         if (event.which === 13) {
-            if (username) {
-                sendMessage()
-            } else {
-                connect()
-            }
+            sendMessage()
         }
     })
 
    eventMap = {
-        'Identity': (event) => {
+        Identity: (event) => {
             // We send, do not receive
         },
-        'Ready': (event) => {
+        Ready: (event) => {
         },
-        'Start': (event) => {
+        Start: (event) => {
             // the server sends a Start never receives
         },
 
-        'Accelerate': (event) => {},
-        'Rotate': (event) => {},
-        'Eject': (event) => {},
+        Accelerate: (event) => {},
+        Rotate: (event) => {},
+        Eject: (event) => {},
 
         // These are also outboundevents
-        'Hex': (event) => {},
-        'Text': (event) => {
-            addChatMessage({
-            username: event.from,
-            message: event.m
-        })
+        Hex: (event) => {},
+        Text: (event) => {
+            addMessage(event)
         },
-        'Spawn': (event) => {},
+        Spawn: (event) => {},
     }
 
-    for (key in eventMap) {
+    for (action in eventMap) {
+        let key = action
         socket.on(key, (event) => {
-            const eventHandler = this.eventMap[key]
+            const eventHandler = eventMap[key]
             eventHandler(event)
         })
     }
 
-
-    function log(message, options) {
-        console.log(message)
+    function addMessage(data) {
+        if (typeof data  !== 'string') {
+            data = JSON.stringify(data, null, 2)
+        }
+        $messages.append(`<div>${data}</div>`)
     }
 
-
-    // Adds the visual chat message to the message list
-    function addChatMessage(data, options) {
-
-        var $usernameDiv = $('<span class="username"/>')
-            .text(data.username)
-        var $messageBodyDiv = $('<span class="messageBody">')
-            .text(data.message)
-
-        var $messageDiv = $('<li class="message"/>')
-            .data('username', data.username)
-            .append($usernameDiv, $messageBodyDiv)
-
-        addMessageElement($messageDiv, options)
-    }
-
-
-    function addMessageElement(el, options) {
-        var $el = $(el)
-        $messages.append($el)
-    }
-
-    function cleanInput(input) {
+    function clean(input) {
         return $('<div/>').text(input).html()
     }
 

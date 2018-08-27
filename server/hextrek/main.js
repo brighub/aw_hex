@@ -53,7 +53,7 @@ class Queue {
     }
 
     available() {
-        return this.limit ?  this.q.length < this.limit : true
+        return this.limit ? this.q.length < this.limit : true
     }
 
     visit(fn) {
@@ -80,7 +80,7 @@ class Queue {
     enqueue(item) {
         if (this.limit && this.q.length >= this.limit) {
             if (this.purge) {
-                while(this.q.length >= this.limit) this.q.pop()
+                while (this.q.length >= this.limit) this.q.pop()
             } else {
                 return undefined
             }
@@ -92,22 +92,16 @@ class Queue {
 }
 
 class Player {
-    constructor(socket,  id) {
+    constructor(socket, id) {
         this.socket = socket
         this.id = id
-        this.events = new Queue({name: `Q-plr-${id}`, limit: 6, purge:true})
+        this.events = new Queue({name: `Q-unit-${id}`, limit: 6, purge: true})
+        this.state = 'creating'
+        this.socket.join('game-grid', () => { console.log(`${this.name} has joined the game-grid`)})
+        this.name = 'unit-' + id
+        this.state = 'connected'
         this.cycle = new Cycle()
         this.pilot = new Pilot()
-        this.state = 'creating'
-        this.socket.join('game-grid')
-    }
-
-    send(eventKey, payload) {
-        this.socket.emit(eventKey, payload)
-    }
-
-    broadcast(eventKey, payload) {
-        this.socket.in('game-grid').emit(eventKey, payload)
     }
 
 }
@@ -122,36 +116,21 @@ class Game {
         this.playerId = 100
 
         this.eventMap = {
-            'Identity': (player, event) => {
-                // now we add the player since they have given a name
-                player.name = event.name
-                player.broadcast('Text', {f: 'MCP', m: `${player.name} has joined!`})
-                player.state = 'connected'
-            },
-            'Ready': (player, event) => {
-                // let wasReady = player.ready
-                // player.ready = event.payload.ready
-                // if (!wasReady && player.ready) {
-                //     this.broadcast('Text', {f: 'MCP', m: `${player.name} is ready!`})
-                // }
-            },
-            'Start': (player, event) => {
-                // the server sends a Start never receives
-            },
+            Accelerate: (player, event) => {},
+            Rotate: (player, event) => {},
+            Eject: (player, event) => {},
 
-            'Accelerate': (player, event) => {},
-            'Rotate': (player, event) => {},
-            'Eject': (player, event) => {},
-
-            // These are also outbound events
-            'Hex': (player, event) => {},
-            'Text': (player, event) => {},
-            'Spawn': (player, event) => {},
+            Hex: (player, event) => {},
+            Text: (player, event) => {
+                player.socket.broadcast('Text', event)
+            },
+            Spawn: (player, event) => {},
         }
 
     }
 
     processEvents() {
+        const startTime = new Date()
         this.players.visit((player) => {
             const event = player.events.dequeue()
             if (event !== undefined) {
@@ -159,6 +138,11 @@ class Game {
                 eventHandler(player, event)
             }
         })
+
+        // try to maintain 20fps
+        const elapsed = new Date() - startTime
+        const sleep = elapsed > 50 ? 50 - (elapsed % 50) : 50 - elapsed
+        this.eventTimer = setTimeout(() => this.processEvents(), sleep)
     }
 
     messageReceiver(key, event, player) {
@@ -172,34 +156,36 @@ class Game {
         }
     }
 
+    attach(socket, player) {
+        socket.on("error", (error) => {
+        })
+
+        socket.on("disconnecting", (reason) => {
+            player.state = 'dropping'
+        })
+
+        socket.on("disconnect", (reason) => {
+            player.state = 'dropped'
+            this.players.remove(player)
+        })
+
+        for (const key in this.eventMap) socket.on(key, (event) => {
+            this.messageReceiver(key, event, player)
+        })
+    }
+
     start(io) {
         io.on("connection", socket => {
             if (this.players.available()) {
                 let player = new Player(socket, this.playerId++)
                 this.players.enqueue(player)
-                for (let key in this.eventMap) socket.on(key, (event) => {
-                    this.messageReceiver(key, event, player)
-                })
-
-                socket.on("error", (error) => {
-                    // if (this.player.state !== 'connected') {
-                    //
-                    // }
-                })
-
-                socket.on("disconnecting", (reason) => {
-                    player.state = 'dropping'
-                })
-
-                socket.on("disconnect", (reason) => {
-                    player.state = 'dropped'
-                    this.players.remove(player)
-                })
+                this.attach(socket, player)
+                socket.broadcast.emit('Text', {f: 'MCP', m: `${player.name} has joined!`})
             } else {
                 socket.disconnect()
             }
         })
-        this.eventTimer = setInterval(() => this.processEvents(), 50)
+        this.eventTimer = setTimeout(() => this.processEvents(), 50)
     }
 
     stop() {
