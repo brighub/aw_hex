@@ -1,5 +1,6 @@
 const LimitedQueue = require('./limited_q')
 const LRU = require('./LRU')
+const hexes = require('./hexes')
 
 class Sprite {
     constructor() {
@@ -22,12 +23,21 @@ class Pilot extends Sprite {
 class Rectifier extends Sprite {
 }
 
-class Hex {
-    constructor() {
+class Wall extends Sprite {
+    constructor(owner, fromEdge, toEdge) {
+        super()
+        this.fromEdge = fromEdge
+        this.toEdge = toEdge
+    }
+}
+
+class Hex extends hexes.Hex {
+    constructor(q, r, s) {
+        super(q, r, s)
         this.owner = 0
         this.walls = []
         this.players = []
-        this.objects = []
+        this.items = []
     }
 }
 
@@ -39,41 +49,25 @@ class Player {
         this.cycle = new Cycle()
         this.pilot = new Pilot()
     }
+
+    broadcast(eventKey, payload) {
+        this.socket.broadcast.emit(eventKey, payload)
+    }
+
+    send(eventKey, payload) {
+        this.socket.emit(eventKey, payload)
+    }
 }
 
 
-// const _packetExamples = ['Identity', name: 'unknown'},
-//     'Identity', name:'untitled'},
-//     'Ready'},
-//     'Start'},
-//     'Accelerate', delta: 1},
-//     'Rotate', arc: 1},
-//     'Eject', priority: 100},
-//     'Hex', ownerId: 0, energy: 0.0, walls: [{ownerId: 0, in: 1, out: 2, energy: 100}]},
-//     'Text', ownerId: 0, body: ''},
-//     'Spawn', isAi: true, entity: '_Rektifryer'}
-// ]
-
-
-// latest:
-
-
-// class MCP {
-//
-//     update(map) {
-//         // a few seconds after people join MCP sends out chat taunts
-//         taunt(map)
-//         reclaim(map)
-//
-//     }
-// }
-
 class Game {
 
-    constructor([maxSlots]) {
+    constructor(maxSlots) {
+        this.maxSlots = maxSlots
         this.players = new LimitedQueue(this.maxSlots)
-        this.readyCount = 0
-        this.map = new HexMap({radius: 5})
+        this.map = new hexes.HexMap(255, (q, r, s) => {return new Hex(q, r, s)})
+        this.playerId = 100
+
         this.eventMap = {
             'Identity': (player, event) => {
                 // now we add the player since they have given a name
@@ -106,46 +100,58 @@ class Game {
 
     }
 
-    broadcast(eventKey, payload) {
-        socket.to('others').emit(eventKey, payload)
-    }
-
     processEvents() {
         if (this.players.size) {
             this.players.visit((player) => {
                 const event = player.events.dequeue()
-                const eventHandler = eventMap[event.t]
+                const eventHandler = this.eventMap[event.t]
+                eventHandler(player, event)
             })
         }
     }
 
-    attachListeners() {
+    start(io) {
         io.on("connection", socket => {
             if (this.players.available() > 0) {
                 let player = new Player(socket)
+                player.id = this.playerId++
+                this.player.state = 'connecting'
                 socket.onmessage = (event) => {
+                    this.player.state = 'connected'
                     if (event.priority > 0) {
-                        this.players.events.add(event, 0)
+                        this.players.events.insert(event, 0)
                     } else {
                         this.players.events.add(event)
                     }
                 }
 
-                socket.on("disconnect", () => {
+                socket.on("error", (error) => {
+                    // if (this.player.state !== 'connected') {
+                    //
+                    // }
+                })
+
+                socket.on("disconnecting", (reason) => {
+                    this.player.state = 'dropping'
+                })
+
+                socket.on("disconnect", (reason) => {
+                    this.player.state = 'dropped'
                     this.players.remove(player)
                 })
             } else {
                 socket.disconnect()
             }
         })
+        this.eventTimer = setInterval(() => this.processEvents(), 50)
     }
 
-    send(message, exclude = []) {
-        // players.visit((player, () => {ret}) => {
-        //
-        // } )
+    stop() {
+        clearInterval(this.eventTimer)
+        this.eventTimer = null
+        this.players.visit((player) => player.socket.disconnect())
+        process.exitCode = 1
     }
-
 }
 
-module.exports = new Game()
+module.exports = {Game, Cycle, Hex, Pilot, Player, Rectifier, Sprite, Wall}
