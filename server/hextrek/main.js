@@ -102,6 +102,7 @@ class Player {
         this.state = 'connected'
         this.cycle = new Cycle()
         this.pilot = new Pilot()
+        this.sprite = this.cycle
     }
 
 }
@@ -117,9 +118,22 @@ class Game {
         this.playerId = 100
 
         this.eventMap = {
-            Accelerate: (player, event) => {},
-            Rotate: (player, event) => {},
-            Eject: (player, event) => {},
+            Accelerate: (player, event) => {
+                player.sprite.speed += (0.05 * event.delta)
+                if (player.sprite.speed > 0.99) player.sprite.speed = 0.99
+                if (player.sprite.speed < 0.01) player.sprite.speed = 0.01
+            },
+            Rotate: (player, event) => {
+                player.sprite.face += (60 * event.delta)
+                if (player.sprite.face > 360) player.sprite.face -= 360
+                if (player.sprite.face < 0) player.sprite.face += 360
+            },
+            Eject: (player, event) => {
+                if (player.sprite === player.cycle) {
+                    player.sprite = player.pilot
+                    player.cycle.dismounted = true
+                }
+            },
             Hex: (player, event) => {},
             Text: (player, event) => {
                 this.io.in('game-grid').emit('Text', event)
