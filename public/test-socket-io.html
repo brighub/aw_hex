@@ -7,18 +7,18 @@
 <body>
 <style>
     .messages {
-        font-size:24px;
-        color:darkcyan;
-        height:200px;
-        border:1px solid black;
-        margin-bottom:4px;
-        background:darkgrey;
-        margin:1em;
-        padding:2px;
+        font-size: 24px;
+        color: darkcyan;
+        height: 200px;
+        border: 1px solid black;
+        margin-bottom: 4px;
+        background: darkgrey;
+        margin: 1em;
+        padding: 2px;
     }
 
     input {
-        width:360px;
+        width: 360px;
     }
 </style>
 
@@ -36,6 +36,7 @@
 
 <script>
 $(function () {
+    var player = null
     var $messages = $('.messages')
     var $input = $('input')
     var socket = io({reconnect: false})
@@ -48,26 +49,16 @@ $(function () {
 
     function sendMessage() {
         var message = $input.val()
+        $input.val('')
         message = clean(message)
         if (message) {
-            $input.val('')
-            addMessage({
-                username: username,
-                message: message
-            })
-            socket.emit('Text', {f:username, m:message})
+            socket.emit('Text', {m: message})
         }
     }
 
-    $input.keydown(function (event) {
-        if (event.which === 13) {
-            sendMessage()
-        }
-    })
-
-   eventMap = {
+    let eventMap = {
         Identity: (event) => {
-            // We send, do not receive
+            player = event
         },
         Ready: (event) => {
         },
@@ -84,19 +75,24 @@ $(function () {
         Text: (event) => {
             addMessage(event)
         },
+        Joined: (event) => {
+            addMessage(event)
+        },
         Spawn: (event) => {},
     }
 
-    for (const property of Object.keys(eventMap)) {
-        const key = property
-        socket.on(key, (event) => {
-            const eventHandler = eventMap[key]
-            eventHandler(event)
-        })
+    for (const property in eventMap) {
+        if (eventMap.hasOwnProperty(property)) {
+            const key = property
+            socket.on(key, (event) => {
+                const eventHandler = eventMap[key]
+                eventHandler(event)
+            })
+        }
     }
 
     function addMessage(data) {
-        if (typeof data  !== 'string') {
+        if (typeof data !== 'string') {
             data = JSON.stringify(data, null, 2)
         }
         $messages.append(`<div>${data}</div>`)
@@ -105,6 +101,12 @@ $(function () {
     function clean(input) {
         return $('<div/>').text(input).html()
     }
+
+    $input.keydown(function (event) {
+        if (event.which === 13) {
+            sendMessage()
+        }
+    })
 
 })
 

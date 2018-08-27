@@ -21,8 +21,8 @@ const start = (app) => {
     console.log('Listening: '.green + ('' + port).magenta)
 
     var hexes = require('./hextrek/main')
-    var game = new hexes.Game()
-    game.start(io)
+    var game = new hexes.Game(io)
+    game.start()
     return app
 }
 

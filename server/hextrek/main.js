@@ -1,4 +1,3 @@
-const io = require("socket.io");
 const hexes = require('./hexes')
 
 class Sprite {
@@ -110,7 +109,8 @@ class Player {
 
 class Game {
 
-    constructor() {
+    constructor(io) {
+        this.io = io
         this.maxSlots = 6
         this.players = new Queue({name: 'playerList', limit: this.maxSlots})
         this.map = new hexes.HexMap(255, (q, r, s) => {return new Hex(q, r, s)})
@@ -122,7 +122,7 @@ class Game {
             Eject: (player, event) => {},
             Hex: (player, event) => {},
             Text: (player, event) => {
-                player.socket.broadcast('Text', event)
+                this.io.in('game-grid').emit('Text', event)
             },
             Spawn: (player, event) => {},
         }
@@ -131,28 +131,26 @@ class Game {
 
     processEvents() {
         const startTime = new Date()
+
         this.players.visit((player) => {
-            const event = player.events.dequeue()
-            if (event !== undefined) {
-                const eventHandler = this.eventMap[event.key]
-                eventHandler(player, event)
+            const execute = player.events.dequeue()
+            if (execute !== undefined) {
+                execute()
             }
         })
 
         // try to maintain 20fps
         const elapsed = new Date() - startTime
-        const sleep = elapsed > 50 ? 50 - (elapsed/2 % 25) : 50 - elapsed
-        this.eventTimer = setTimeout(() => this.processEvents(), sleep)
+        const sleep = elapsed > 50 ? 50 - (elapsed % 50) : 50 - elapsed
+        this.eventTimer = setTimeout(this.processEvents, sleep)
     }
 
     messageReceiver(key, event, player) {
-        if (event.priority === 'now') {
-            // to do move priority to message definition in server
-            const eventHandler = this.eventMap[key]
+        const eventHandler = this.eventMap[key]
+        if (eventHandler.priority === 'now') {
             eventHandler(player, event)
         } else {
-            event.key = key
-            player.events.enqueue(event)
+            player.events.enqueue(() => eventHandler(player, event))
         }
     }
 
@@ -169,16 +167,18 @@ class Game {
             this.players.remove(player)
         })
 
-        for (const property of Object.keys(this.eventMap)) {
-            const key = property
-            socket.on(key, (event) => {
-                this.messageReceiver(key, event, player)
-            })
+        for (const property in this.eventMap) {
+            if (this.eventMap.hasOwnProperty(property)) {
+                const key = property
+                socket.on(key, (event) => {
+                    this.messageReceiver(key, event, player)
+                })
+            }
         }
     }
 
-    start(io) {
-        io.on("connection", socket => {
+    start() {
+        this.io.on("connection", socket => {
             if (this.players.available()) {
                 let player = new Player(socket, this.playerId += 37)
                 this.players.enqueue(player)
@@ -188,11 +188,12 @@ class Game {
                 socket.disconnect()
             }
         })
-        this.eventTimer = setTimeout(() => this.processEvents(), 50)
+        this.processEvents = this.processEvents.bind(this)
+        this.eventTimer = setTimeout(this.processEvents, 50)
     }
 
     stop() {
-        clearTimeout(this.eventTimer)
+        if (this.eventTimer) clearTimeout(this.eventTimer)
         this.eventTimer = null
         this.players.visit((player) => player.socket.disconnect())
         process.exitCode = 1
