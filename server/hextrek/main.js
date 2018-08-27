@@ -1,5 +1,4 @@
-const LimitedQueue = require('./limited_q')
-const LRU = require('./LRU')
+const io = require("socket.io");
 const hexes = require('./hexes')
 
 class Sprite {
@@ -41,48 +40,100 @@ class Hex extends hexes.Hex {
     }
 }
 
-class Player {
-    constructor(socket) {
-        this.socket = socket
-        this.name = 'untitled'
-        this.events = new LRU(6)
-        this.cycle = new Cycle()
-        this.pilot = new Pilot()
+class Queue {
+    constructor({name, limit, purge}) {
+        this.q = []
+        this.name = name
+        this.limit = limit
+        this.purge = purge
     }
 
-    broadcast(eventKey, payload) {
-        this.socket.broadcast.emit(eventKey, payload)
+    empty() {
+        return this.q.length === 0
+    }
+
+    available() {
+        return this.limit ?  this.q.length < this.limit : true
+    }
+
+    visit(fn) {
+        this.q.forEach(fn)
+    }
+
+    dequeue() {
+        // index 0 = front of list!
+        if (this.q.length) {
+            return this.q.shift()
+        }
+        return undefined
+    }
+
+    remove(item) {
+        for (let k = 0; k < this.q.length; k++) {
+            if (this.q[item] === item) {
+                this.q.splice(k, 1)
+                return;
+            }
+        }
+    }
+
+    enqueue(item) {
+        if (this.limit && this.q.length >= this.limit) {
+            if (this.purge) {
+                while(this.q.length >= this.limit) this.q.pop()
+            } else {
+                return undefined
+            }
+        }
+
+        this.q.push(item)
+        return item
+    }
+}
+
+class Player {
+    constructor(socket,  id) {
+        this.socket = socket
+        this.id = id
+        this.events = new Queue({name: `Q-plr-${id}`, limit: 6, purge:true})
+        this.cycle = new Cycle()
+        this.pilot = new Pilot()
+        this.state = 'creating'
+        this.socket.join('game-grid')
     }
 
     send(eventKey, payload) {
         this.socket.emit(eventKey, payload)
     }
+
+    broadcast(eventKey, payload) {
+        this.socket.in('game-grid').emit(eventKey, payload)
+    }
+
 }
 
 
 class Game {
 
-    constructor(maxSlots) {
-        this.maxSlots = maxSlots
-        this.players = new LimitedQueue(this.maxSlots)
+    constructor() {
+        this.maxSlots = 6
+        this.players = new Queue({name: 'playerList', limit: this.maxSlots})
         this.map = new hexes.HexMap(255, (q, r, s) => {return new Hex(q, r, s)})
         this.playerId = 100
 
         this.eventMap = {
             'Identity': (player, event) => {
                 // now we add the player since they have given a name
-                player.name = event.payload.name
-                player.socket.join('game-grid', () => {
-                    this.players.add(player)
-                    this.broadcast('Text', `${player.name} has joined!`)
-                })
+                player.name = event.name
+                player.broadcast('Text', {f: 'MCP', m: `${player.name} has joined!`})
+                player.state = 'connected'
             },
             'Ready': (player, event) => {
-                let wasReady = player.ready
-                player.ready = event.payload.ready
-                if (!wasReady && player.ready) {
-                    this.broadcast('Text', `${player.name} is ready!`)
-                }
+                // let wasReady = player.ready
+                // player.ready = event.payload.ready
+                // if (!wasReady && player.ready) {
+                //     this.broadcast('Text', {f: 'MCP', m: `${player.name} is ready!`})
+                // }
             },
             'Start': (player, event) => {
                 // the server sends a Start never receives
@@ -101,29 +152,34 @@ class Game {
     }
 
     processEvents() {
-        if (this.players.size) {
-            this.players.visit((player) => {
-                const event = player.events.dequeue()
-                const eventHandler = this.eventMap[event.t]
+        this.players.visit((player) => {
+            const event = player.events.dequeue()
+            if (event !== undefined) {
+                const eventHandler = this.eventMap[event.key]
                 eventHandler(player, event)
-            })
+            }
+        })
+    }
+
+    messageReceiver(key, event, player) {
+        if (event.priority === 'now') {
+            // to do move priority to message definition in server
+            const eventHandler = this.eventMap[key]
+            eventHandler(player, event)
+        } else {
+            event.key = key
+            player.events.enqueue(event)
         }
     }
 
     start(io) {
         io.on("connection", socket => {
-            if (this.players.available() > 0) {
-                let player = new Player(socket)
-                player.id = this.playerId++
-                this.player.state = 'connecting'
-                socket.onmessage = (event) => {
-                    this.player.state = 'connected'
-                    if (event.priority > 0) {
-                        this.players.events.insert(event, 0)
-                    } else {
-                        this.players.events.add(event)
-                    }
-                }
+            if (this.players.available()) {
+                let player = new Player(socket, this.playerId++)
+                this.players.enqueue(player)
+                for (let key in this.eventMap) socket.on(key, (event) => {
+                    this.messageReceiver(key, event, player)
+                })
 
                 socket.on("error", (error) => {
                     // if (this.player.state !== 'connected') {
@@ -132,11 +188,11 @@ class Game {
                 })
 
                 socket.on("disconnecting", (reason) => {
-                    this.player.state = 'dropping'
+                    player.state = 'dropping'
                 })
 
                 socket.on("disconnect", (reason) => {
-                    this.player.state = 'dropped'
+                    player.state = 'dropped'
                     this.players.remove(player)
                 })
             } else {
